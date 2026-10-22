@@ -128,6 +128,14 @@ const uint8_t setEnergy = 0xAF; // 0xAF Set Energy - Data: 1 - 0xFFFF
 
 const uint8_t setDrawingMode = 0xBE; // 0xBE DrawingMode - Data: 1 for Text, 0 for Images
 
+// CYLO keep-alive ("ping") command: 9 bytes sent to the existing TX/write
+// characteristic to prevent the printer from tearing down the link when
+// idle. Enabled only for PRINTER_CYLO and only on request (disabled by
+// default to preserve the library's existing behaviour).
+const uint8_t ucKeepAlive[9] = {0x51, 0x78, 0xA3, 0x00, 0x01, 0x00, 0x00, 0x00, 0xFF};
+static int iKeepAliveInterval = 0;   // milliseconds between pings; 0 = disabled
+static unsigned long ulKeepAliveLast = 0;
+
 // GetDevInfo = 0xA8  # Data: 0
 // XOff = (0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x10, 0x70, 0xFF)
 // XOn = (0x51, 0x78, 0xAE, 0x01, 0x01, 0x00, 0x00, 0x00, 0xFF)
@@ -875,6 +883,8 @@ int tpConnect(const char *szMacAddress)
 
           bConnected = 1;
           if (ucPrinterType == PRINTER_CYLO) {
+            // restart the keep-alive window for the new connection
+            ulKeepAliveLast = millis();
             // CYLO throughput: negotiate a larger MTU so the acknowledged
             // writes can carry more payload per round trip. The request can
             // fail or the peer may accept a smaller value, so read back the
@@ -985,6 +995,13 @@ int tpConnect(const char *szMacAddress)
 void tpDisconnect(void)
 {
   if (!bConnected) return; // nothing to do
+  // stop keep-alive scheduling with the dying connection: the tick is
+  // gated on bConnected, so it will never use the stale characteristic
+  // pointers, and no notification subscription is created for CYLO
+  // (RX notifications are optional per the protocol reference), so there
+  // is nothing to unsubscribe either. The configured interval is kept for
+  // the next connection; the timer restarts at the next connect.
+  ulKeepAliveLast = millis();
 #ifdef HAL_ESP32_HAL_H_
    if (pClient != NULL)
    {
@@ -1252,6 +1269,7 @@ static void tpWriteData(uint8_t *pData, int iLen)
 {
     if (!bConnected) // || !pRemoteCharacteristicData)
         return;
+    tpKeepAlive(); // fire the CYLO keep-alive if the interval elapsed
     // CYLO: field tests of the CYLO BTPrinter show every write without
     // response rejected by the BLE stack with rc=6 (ESP_GATT_REQ_NOT_SUPPORTED
     // on the ESP32 Bluedroid GATT client), so the byte stream is silently
@@ -1634,6 +1652,33 @@ void tpSetEnergy(int iEnergy)
   if (bConnected && ucPrinterType == PRINTER_CAT)
      tpWriteCatCommandD16(setEnergy,iEnergy);
 } /* tpSetEnergy */
+//
+// Enable/disable the CYLO keep-alive ping.
+// A positive interval (milliseconds) enables it; 0 or a negative value
+// disables it. Disabled by default; inactive for non-CYLO printer types.
+//
+void tpSetKeepAlive(int iInterval)
+{
+   iKeepAliveInterval = (iInterval > 0) ? iInterval : 0;
+   ulKeepAliveLast = millis(); // restart the interval window
+} /* tpSetKeepAlive() */
+//
+// CYLO keep-alive tick: send the 9-byte ping to the TX characteristic when
+// the configured interval has elapsed. Non-blocking (millis()-based only),
+// safe to call every loop() iteration and also invoked automatically from
+// tpWriteData() so long prints can never exceed the interval either.
+// Does nothing when disabled, not connected, or for other printer types.
+//
+void tpKeepAlive(void)
+{
+   if (!iKeepAliveInterval || !bConnected || ucPrinterType != PRINTER_CYLO)
+      return;
+   unsigned long ulNow = millis();
+   if (ulNow - ulKeepAliveLast < (unsigned long)iKeepAliveInterval)
+      return;
+   ulKeepAliveLast = ulNow; // stamp before sending: tpWriteData re-enters here
+   tpWriteData((uint8_t *)ucKeepAlive, sizeof(ucKeepAlive));
+} /* tpKeepAlive() */
 //
 // Send the preamble for transmitting graphics
 //

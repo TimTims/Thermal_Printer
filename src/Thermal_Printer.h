@@ -105,9 +105,22 @@ char *tpGetName(void);
 //
 void tpFeed(int iLines);
 //
-// tpSetEnergy Set Energy - switch between eco and nice images :) 
+// tpSetEnergy Set Energy - switch between eco and nice images :)
 //
 void tpSetEnergy(int iEnergy);
+//
+// Enable CYLO keep-alive: send the printer's 9-byte status ping command
+// every iInterval milliseconds while connected. Pass a positive interval
+// (e.g. 300000 = 5 minutes) to enable, 0 (or negative) to disable.
+// Disabled by default; CYLO only.
+// Call tpKeepAlive() periodically (e.g. from loop()); it never blocks.
+//
+void tpSetKeepAlive(int iInterval);
+//
+// CYLO keep-alive tick: send the ping if enabled, connected, and the
+// interval has elapsed; non-blocking, safe to call every loop() iteration.
+//
+void tpKeepAlive(void);
 //
 // Return the measurements of a rectangle surrounding the given text string
 // rendered in the given font

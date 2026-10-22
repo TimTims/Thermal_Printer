@@ -78,6 +78,29 @@ If you find this code useful, please consider becoming a Github Sponsor or sendi
   (back buffer, fonts, BMP, lines) work unchanged. 1D barcodes work; QR codes
   (`tpQRCode`) are not enabled for this type yet.
 - **Paper feed:** `ESC d n` (`1B 64 n`) advances n lines via `tpFeed()`.
+- **Keep-alive (CYLO only, disabled by default):** the printer drops idle
+  links, so the library can send its 9-byte ping command
+  (`51 78 A3 00 01 00 00 00 FF`) to the TX characteristic at a fixed
+  interval. Sequence:
+
+```cpp
+tpConnect();
+tpSetKeepAlive(300000);   // ping every 5 minutes; 0 = disable
+// ...
+void loop()
+{
+  tpKeepAlive();          // non-blocking; sends the ping when due
+  // ... other loop() work
+}
+```
+
+  The interval restarts at each `tpConnect()`/`tpSetKeepAlive()`, and
+  `tpWriteData()` fires an overdue ping automatically before a print, so a
+  long print can never outlast the interval. `tpDisconnect()` stops
+  scheduling (its tick is gated on the connection); no RX notification is
+  subscribed, so there is nothing to clean up. Other printer types are
+  unaffected.
+
 - **Timing:** the printer has only a small internal buffer; data sent faster
   than the print head consumes it is silently dropped (usually truncating the
   bottom of the image). The library sends 20-byte chunks with short delays.
