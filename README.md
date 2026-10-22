@@ -64,6 +64,14 @@ If you find this code useful, please consider becoming a Github Sponsor or sendi
   produced fragmented prints. For `PRINTER_CYLO` the library therefore always
   uses write with response (slower but reliable), regardless of
   `tpSetWriteMode()`; other printer types keep their existing mode.
+- **Throughput:** writes with response cost one acknowledged round trip each,
+  so the library negotiates a 200-byte MTU for CYLO and sends 20–182 byte
+  chunks (the ATT payload `MTU-3`, capped at the protocol reference's
+  182 bytes; it falls back to 20 bytes if negotiation is not confirmed).
+  It prints `[CYLO] effective MTU=` / `[CYLO] chunk=` at connect and
+  `[CYLO] raster N bytes in M writes` after `tpPrintBuffer()`. If a
+  larger chunk ever corrupts output, reduce `iCYLOChunk` and retest rather
+  than disabling write responses.
 - **Printing:** standard ESC/POS raster (`GS v 0`, `1D 76 30 00`), 384 dots
   (48 bytes) per row, MSB-first pixel bits, little-endian width/height —
   identical to the existing MTP2/MTP3 raster path, and all rendering APIs

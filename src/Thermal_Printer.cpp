@@ -59,6 +59,13 @@ static int16_t iCursorX = 0, iCursorY = 0;
 static uint8_t bWithResponse = 0; // default to not wait for a response
 static uint8_t *pBackBuffer = NULL;
 static uint8_t bConnected = 0;
+// CYLO throughput: after connecting, an MTU negotiation sets the maximum
+// ATT payload size usable for the transparent-UART writes. It starts
+// conservatively at the default 20-byte ATT payload (MTU 23) and is only
+// increased in tpConnect() if the printer confirms the larger MTU.
+// 182 bytes is the largest chunk the protocol reference recommends.
+static int iCYLOChunk = 20;        // CYLO write chunk size (bytes)
+static int iCYLOWrites = 0;        // diagnostic: writes issued for CYLO per print
 static void tpWriteData(uint8_t *pData, int iLen);
 extern "C" {
 extern unsigned char ucFont[], ucBigFont[];
@@ -867,6 +874,26 @@ int tpConnect(const char *szMacAddress)
               pRemoteCharacteristicNotify->registerForNotify(ESP_notify_callback);
 
           bConnected = 1;
+          if (ucPrinterType == PRINTER_CYLO) {
+            // CYLO throughput: negotiate a larger MTU so the acknowledged
+            // writes can carry more payload per round trip. The request can
+            // fail or the peer may accept a smaller value, so read back the
+            // effective MTU and derive the ATT payload conservatively.
+            // 182 bytes is the chunk size recommended by the protocol
+            // reference; start from it and fall back to 20 if negotiation
+            // fails or is not confirmed.
+            pClient->setMTU(0x00C8); // request 200-byte MTU (182-byte payloads)
+            uint16_t uMTU = pClient->getMTU(); // read back the effective MTU
+            if (uMTU > 23) {
+               int iChunk = uMTU - 3; // 3 bytes ATT overhead per write
+               if (iChunk > 182) iChunk = 182;
+               iCYLOChunk = iChunk;
+            } else {
+               iCYLOChunk = 20; // negotiation failed or default; keep safe size
+            }
+            Serial.print("[CYLO] effective MTU="); Serial.println(uMTU);
+            Serial.print("[CYLO] chunk="); Serial.println(iCYLOChunk);
+          }
           return 1;
         }
       } // if connected
@@ -1237,16 +1264,26 @@ static void tpWriteData(uint8_t *pData, int iLen)
     // Write BLE data without response, otherwise the printer
     // stutters and takes much longer to print
 #ifdef HAL_ESP32_HAL_H_
+    int iChunk = 20; // safe default for all printer types
+    if (ucPrinterType == PRINTER_CYLO) {
+       // CYLO uses the negotiated MTU-derived chunk size (max of the
+       // effective ATT payload capped at 182 bytes; 20 if negotiation
+       // failed). Only used here, so other printer types keep the
+       // conservative 20-byte chunking that their stack requires.
+       iChunk = iCYLOChunk;
+    }
     // For some reason the ESP32 sends some corrupt data if we ask it
     // to write more than 20 bytes at a time (used to be 48)
-    while (iLen > 20) {
-       pRemoteCharacteristicData->writeValue(pData, 20, bWriteResponse);
+    while (iLen > iChunk) {
+       pRemoteCharacteristicData->writeValue(pData, iChunk, bWriteResponse);
+       iCYLOWrites++; // diagnostic count for CYLO throughput analysis
        if (!bWriteResponse) delay(4);
-       pData += 20;
-       iLen -= 20;
+       pData += iChunk;
+       iLen -= iChunk;
     }
     if (iLen) {
       pRemoteCharacteristicData->writeValue(pData, iLen, bWriteResponse);
+      iCYLOWrites++;
     }
 #endif
 #ifdef _ARDUINO_BLE_H_
@@ -1706,6 +1743,7 @@ int i;
   if (!bConnected)
     return;
 
+  iCYLOWrites = 0; // reset the CYLO write counter for this print
   tpPreGraphics(bb_width, bb_height);
 
   // Print the graphics
@@ -1717,6 +1755,15 @@ int i;
   
   tpPostGraphics();
 
+  if (ucPrinterType == PRINTER_CYLO) {
+     // throughput diagnostics for the CYLO raster path
+     Serial.print("[CYLO] raster ");
+     Serial.print(bb_pitch * bb_height);
+     Serial.print(" bytes in ");
+     Serial.print(iCYLOWrites);
+     Serial.print(" writes, chunk=");
+     Serial.println(iCYLOChunk);
+  }
 } /* tpPrintBuffer() */
 
 void tpPrintBufferSide(void)
