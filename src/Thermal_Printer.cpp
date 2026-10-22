@@ -90,14 +90,18 @@ const PRINTERID szPrinterIDs[] PROGMEM = {
 	{(char *)"PeriPage+", PRINTER_PERIPAGEPLUS},
 	{(char *)"PeriPage_", PRINTER_PERIPAGE},
 	{(char *)"T02", PRINTER_FOMEMO},
+	{(char *)"Cylo Mini Thermal Printer", PRINTER_CYLO},
 	{(char *)"MX06", PRINTER_CAT},
 	{(char *)"MX10", PRINTER_CAT},
 	{NULL, 0}		// terminator
 };
-const int iPrinterWidth[] = {384, 576, 384, 576, 384, 384};
+const int iPrinterWidth[] = {384, 576, 384, 576, 384, 384, 384};
 const uint8_t PeriPrefix[] = {0x10,0xff,0xfe,0x01};
-const char *szServiceNames[] = {(char *)"18f0", (char *)"18f0", (char *)"ae30", (char *)"ff00",(char *)"ff00", (char *)"ff00"}; // 16-bit UUID of the printer services we want
-const char *szCharNames[] = {(char *)"2af1", (char *)"2af1", (char *)"ae01",(char *)"ff02", (char *)"ff02", (char *)"ff02"}; // 16-bit UUID of printer data characteristics we want
+
+// 16-bit UUID of the printer services we want
+// (PRINTER_CYLO uses the full 128-bit ISSC Transparent UART service UUID)
+const char *szServiceNames[] = {(char *)"18f0", (char *)"18f0", (char *)"ae30", (char *)"ff00",(char *)"ff00", (char *)"ff00", (char *)"49535343-fe7d-4ae5-8fa9-9fafd205e455"};
+const char *szCharNames[] = {(char *)"2af1", (char *)"2af1", (char *)"ae01",(char *)"ff02", (char *)"ff02", (char *)"ff02", (char *)"49535343-8841-43f4-a8d4-ecbe34729bb3"}; // 16-bit UUID of printer data characteristics we want
 
 // Command sequences for the 'cat' printer
 // for more details see https://github.com/fulda1/Thermal_Printer/wiki/Cat-printer-protocol
@@ -829,7 +833,7 @@ int tpConnect(const char *szMacAddress)
     }
     // Obtain a reference to the service we are after in the remote BLE server.
     BLERemoteService* pRemoteService = NULL;
-    if (ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3)
+    if (ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_CYLO)
        pRemoteService = pClient->getService(SERVICE_UUID0);
     else if (ucPrinterType == PRINTER_CAT)
        pRemoteService = pClient->getService(SERVICE_UUID1);
@@ -843,7 +847,7 @@ int tpConnect(const char *szMacAddress)
       if (pClient->isConnected())
       {
         pRemoteCharacteristicData = NULL;
-        if (ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3)
+        if (ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_CYLO)
           pRemoteCharacteristicData = pRemoteService->getCharacteristic(CHAR_UUID_DATA0);
         else if (ucPrinterType == PRINTER_CAT)
           {
@@ -999,6 +1003,13 @@ int i = 0;
        i++;
      }
    } // while searching our name list
+   // CYLO: the advertised BLE name is not confirmed to be the full display
+   // name, so match any name starting with 'Cylo' (the BLE advertising
+   // packet can also truncate a longer advertised name). This fallback only
+   // applies after the exact-match list above has been exhausted, so the
+   // matching behaviour of the existing printer types is unchanged.
+   if (strncmp(szName, "Cylo", 4) == 0)
+      return PRINTER_CYLO;
    return 255; // invalid name
 } /* tpFindPrinterName() */
 //
@@ -1160,6 +1171,11 @@ int iLen = strlen(szName);
   } else if (ucPrinterType == PRINTER_CAT) {
     myService = BLEClientService(0xae30);
     myDataChar = BLEClientCharacteristic(0xae01);
+  } else if (ucPrinterType == PRINTER_CYLO) {
+    // CYLO uses the ISSC Transparent UART service; the full 128-bit UUID is
+    // required here because it can't be expressed as a 16-bit shorthand.
+    myService = BLEClientService("49535343-fe7d-4ae5-8fa9-9fafd205e455");
+    myDataChar = BLEClientCharacteristic("49535343-8841-43f4-a8d4-ecbe34729bb3");
   } else if (ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS) {
     myService = BLEClientService(0xff00);
     myDataChar = BLEClientCharacteristic(0xff02);
@@ -1270,7 +1286,7 @@ int i;
 
   if (iFont < FONT_12x24 || iFont > FONT_9x17) return;
 
-  if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS) {
+  if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_CYLO || ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS) {
      i = 0;
      if (ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS) {
         ucTemp[i++] = 0x10; ucTemp[i++] = 0xff;
@@ -1444,7 +1460,7 @@ int iLen;
      }
      return 1;
   }
-  if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS)
+  if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_CYLO || ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS)
   {
     iLen = strlen(pString);
     if (ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS) {
@@ -1520,6 +1536,10 @@ uint8_t ucTemp[16];
     } else {
       tpWriteCatCommandD8(paperFeed,iLines);
     }
+  } else if (ucPrinterType == PRINTER_CYLO) {
+    // ESC d n - advance paper n lines (see the protocol documentation)
+    ucTemp[0] = 0x1b; ucTemp[1] = 0x64; ucTemp[2] = (uint8_t)iLines;
+    tpWriteData(ucTemp, 3);
   } else if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3) {
    // The PT-210 doesn't have a "feed-by-line" command
    // so instead, we'll send 1 byte-wide graphics of a blank segment
@@ -1560,7 +1580,7 @@ uint8_t *s, ucTemp[16];
     tpWriteCatCommandD8(setDrawingMode, 0);		// drawing mode 0 for image
     //tpWriteCatCommandD8(paperFeed,4);		// is good to start with some feed to wake up printer
     //tpWriteCatCommandD8(paperFeed,4);		// is good to start with some feed to wake up printer
-  } else if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3) {
+  } else if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_CYLO) {
   // The printer command for graphics is laid out like this:
   // 0x1d 'v' '0' '0' xLow xHigh yLow yHigh <x/8 * y data bytes>
     ucTemp[0] = 0x1d; ucTemp[1] = 'v';
@@ -1593,6 +1613,14 @@ static void tpPostGraphics(void)
    } else if (ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS) {
  //     uint8_t ucTemp[] = {0x1b, 0x4a, 0x40, 0x10, 0xff, 0xfe, 0x45};
  //     tpWriteData(ucTemp, sizeof(ucTemp));
+   } else if (ucPrinterType == PRINTER_CYLO) {
+      // The printer's internal buffer is only a few KB; BLE writes are
+      // accepted before the print head has consumed the raster data. Wait
+      // for the head to catch up after the last chunk. 1500 ms comes from
+      // the protocol reference; it may need tuning for this specific device
+      // (increase if the bottom of the image is truncated, decrease if
+      // white horizontal bands appear).
+      delay(1500);
    }
 } /* tpPostGraphics() */
 
@@ -1613,7 +1641,7 @@ static void tpSendScanline(uint8_t *s, int iLen)
       ucTemp[6 + iLen + 1] = 0xff;
       ucTemp[6 + iLen] = CheckSum(&ucTemp[6], iLen);
       tpWriteData(ucTemp, 8 + iLen);
-  } else if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS) {
+  } else if (ucPrinterType == PRINTER_FOMEMO || ucPrinterType == PRINTER_MTP2 || ucPrinterType == PRINTER_MTP3 || ucPrinterType == PRINTER_CYLO || ucPrinterType == PRINTER_PERIPAGE || ucPrinterType == PRINTER_PERIPAGEPLUS) {
       tpWriteData(s, iLen);
   }
     // NB: To reliably send lots of data over BLE, you either use WRITE with
