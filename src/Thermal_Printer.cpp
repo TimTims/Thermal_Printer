@@ -1225,23 +1225,32 @@ static void tpWriteData(uint8_t *pData, int iLen)
 {
     if (!bConnected) // || !pRemoteCharacteristicData)
         return;
+    // CYLO: field tests of the CYLO BTPrinter show every write without
+    // response rejected by the BLE stack with rc=6 (ESP_GATT_REQ_NOT_SUPPORTED
+    // on the ESP32 Bluedroid GATT client), so the byte stream is silently
+    // truncated and prints come out fragmented. Its characteristic requires
+    // write with response, so force that write mode for this printer type
+    // while keeping the selectable behaviour for all other models.
+    uint8_t bWriteResponse = bWithResponse;
+    if (ucPrinterType == PRINTER_CYLO)
+       bWriteResponse = MODE_WITH_RESPONSE; // characteristic rejects write-without-response (rc=6)
     // Write BLE data without response, otherwise the printer
     // stutters and takes much longer to print
 #ifdef HAL_ESP32_HAL_H_
     // For some reason the ESP32 sends some corrupt data if we ask it
     // to write more than 20 bytes at a time (used to be 48)
     while (iLen > 20) {
-       pRemoteCharacteristicData->writeValue(pData, 20, bWithResponse);
-       if (!bWithResponse) delay(4);
+       pRemoteCharacteristicData->writeValue(pData, 20, bWriteResponse);
+       if (!bWriteResponse) delay(4);
        pData += 20;
        iLen -= 20;
     }
     if (iLen) {
-      pRemoteCharacteristicData->writeValue(pData, iLen, bWithResponse);
+      pRemoteCharacteristicData->writeValue(pData, iLen, bWriteResponse);
     }
 #endif
 #ifdef _ARDUINO_BLE_H_
-    pRemoteCharacteristicData.writeValue(pData, iLen, bWithResponse);
+    pRemoteCharacteristicData.writeValue(pData, iLen, bWriteResponse);
 #endif
 #ifdef ARDUINO_NRF52_ADAFRUIT
     myDataChar.write((const void *)pData, (uint16_t)iLen);

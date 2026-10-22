@@ -57,8 +57,13 @@ If you find this code useful, please consider becoming a Github Sponsor or sendi
   as CYLO.
 - **Transport:** Bluetooth LE, ISSC Transparent UART service
   `49535343-fe7d-4ae5-8fa9-9fafd205e455`, write characteristic
-  `49535343-8841-43f4-a8d4-ecbe34729bb3` (write-without-response by default;
-  `tpSetWriteMode()` can switch to write-with-response if data is lost).
+  `49535343-8841-43f4-a8d4-ecbe34729bb3`.
+  **Hardware finding:** the CYLO's characteristic rejects write without
+  response (ESP32 GATT client reports `writeValue failed rc=6`,
+  `ESP_GATT_REQ_NOT_SUPPORTED`), which silently truncated the stream and
+  produced fragmented prints. For `PRINTER_CYLO` the library therefore always
+  uses write with response (slower but reliable), regardless of
+  `tpSetWriteMode()`; other printer types keep their existing mode.
 - **Printing:** standard ESC/POS raster (`GS v 0`, `1D 76 30 00`), 384 dots
   (48 bytes) per row, MSB-first pixel bits, little-endian width/height —
   identical to the existing MTP2/MTP3 raster path, and all rendering APIs
