@@ -66,6 +66,7 @@ static uint8_t bConnected = 0;
 // 182 bytes is the largest chunk the protocol reference recommends.
 static int iCYLOChunk = 20;        // CYLO write chunk size (bytes)
 static int iCYLOWrites = 0;        // diagnostic: writes issued for CYLO per print
+static uint8_t bGraphicsActive = 0; // a raster command stream is open (pre→post graphics)
 static void tpWriteData(uint8_t *pData, int iLen);
 extern "C" {
 extern unsigned char ucFont[], ucBigFont[];
@@ -1673,6 +1674,13 @@ void tpKeepAlive(void)
 {
    if (!iKeepAliveInterval || !bConnected || ucPrinterType != PRINTER_CYLO)
       return;
+   if (bGraphicsActive) {
+      // defer: sending the ping now would insert 9 bytes into the open
+      // raster command stream (between GS v 0 header and the last row)
+      // and corrupt the print. The deferred ping is sent by the next
+      // tick after tpPostGraphics() closes the stream.
+      return;
+   }
    unsigned long ulNow = millis();
    if (ulNow - ulKeepAliveLast < (unsigned long)iKeepAliveInterval)
       return;
@@ -1685,6 +1693,8 @@ void tpKeepAlive(void)
 static void tpPreGraphics(int iWidth, int iHeight)
 {
 uint8_t *s, ucTemp[16];
+
+  bGraphicsActive = 1; // raster command stream open; defer keep-alive until tpPostGraphics()
 
   if (ucPrinterType == PRINTER_CAT) {
 //    tpWriteCatCommandD8(getDevState, 0);		// check for stte (paper, heat etc)
@@ -1738,6 +1748,7 @@ static void tpPostGraphics(void)
       // white horizontal bands appear).
       delay(1500);
    }
+   bGraphicsActive = 0; // raster stream closed: a deferred keep-alive may be sent now
 } /* tpPostGraphics() */
 
 static void tpSendScanline(uint8_t *s, int iLen)
