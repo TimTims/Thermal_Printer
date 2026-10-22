@@ -43,15 +43,13 @@ If you find this code useful, please consider becoming a Github Sponsor or sendi
 
 - **Printer type:** `PRINTER_CYLO` — registered as its own type, not routed
   through any other printer's protocol selection.
-- **Display/registry name:** `Cylo Mini Thermal Printer` (display name only;
-  it is not assumed that the device broadcasts this exact string). Matching
-  uses the existing exact-name table plus a CYLO-only fallback that accepts
-  any advertised name beginning with `Cylo`, so a BLE advertising-packet
-  truncation of a longer name still resolves. **Unknown (not observed on
-  hardware):** the actual advertised name of the device. If it does not
-  begin with `Cylo`, add it to `szPrinterIDs` in `src/Thermal_Printer.cpp`.
-  Use `tpScan("Cylo", seconds)` followed by `tpConnect()`, or auto-detect
-  with `tpScan()`.
+- **Display/registry name:** `Cylo Mini Thermal Printer`. The device advertises
+  the BLE name `CYLO BTPrinter` (observed on hardware). Matching uses the
+  existing exact-name table plus a CYLO-only, case-insensitive fallback that
+  accepts any advertised name beginning with `Cylo`/`CYLO`, so the
+  actual advertisement resolves and a BLE advertising-packet truncation of a
+  longer name would still resolve. Use `tpScan("CYLO", seconds)` followed by
+  `tpConnect()`, or auto-detect with `tpScan()`.
 - **Protocol reference:** the printer speaks the protocol documented at
   <https://github.com/joshmcarthur/yhk-mini-printer/blob/main/docs/protocol.md>.
   That reference defines the device family's communication; it is used here

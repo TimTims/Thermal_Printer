@@ -49,6 +49,7 @@
 #endif
 
 #include "Thermal_Printer.h"
+#include <ctype.h> // for tolower() in the case-insensitive name compare
 
 static char szPrinterName[32];
 volatile uint8_t ucPrinterType; // one of PRINTER_MTP2, PRINTER_CAT, etc
@@ -982,16 +983,40 @@ void tpDisconnect(void)
 #endif
 } /* tpDisconnect() */
 //
+// Case-insensitive prefix comparison
+// (portable replacement for strncasecmp(), which is not uniformly available
+// in the string headers of all supported Arduino cores)
+static int isPrefixCI(const char *szName, const char *szPrefix)
+{
+   if (szName == NULL || szPrefix == NULL)
+      return 0;
+   while (*szPrefix) {
+      if (tolower((unsigned char)*szName) != tolower((unsigned char)*szPrefix))
+         return 0;
+      szName++;
+      szPrefix++;
+   }
+   return 1; // whole prefix consumed -> match
+} /* isPrefixCI() */
+
+//
 // Find the printer name from our supported names list
 //
 static uint8_t tpFindPrinterName(char *szName)
 {
 int i = 0;
 
-   szName[9] = 0; // Need to chop off the name after 'PeriPage+'
-                  // because it includes 2 bytes of the BLE MAC address
+   if (szName[0] == 0)
+      return 255;
+   // Copy rather than chop the caller's string: the 9-character truncation
+   // below exists to ignore the BLE MAC address suffix appended after
+   // 'PeriPage' in the advertised name, but it must not corrupt the
+   // caller's buffer (the stored scan name is reused e.g. by tpGetName()).
+   char szTemp[10];
+   strncpy(szTemp, szName, sizeof(szTemp) - 1);
+   szTemp[sizeof(szTemp) - 1] = 0;
    while (szPrinterIDs[i].szBLEName != NULL) {
-     if (strcmp(szName, szPrinterIDs[i].szBLEName) == 0) { // found a supported printer
+     if (strcmp(szTemp, szPrinterIDs[i].szBLEName) == 0) { // found a supported printer
 #ifdef DEBUG_OUTPUT
      Serial.print("Found a match for ");
      Serial.println(szName);
@@ -1003,12 +1028,12 @@ int i = 0;
        i++;
      }
    } // while searching our name list
-   // CYLO: the advertised BLE name is not confirmed to be the full display
-   // name, so match any name starting with 'Cylo' (the BLE advertising
-   // packet can also truncate a longer advertised name). This fallback only
-   // applies after the exact-match list above has been exhausted, so the
-   // matching behaviour of the existing printer types is unchanged.
-   if (strncmp(szName, "Cylo", 4) == 0)
+   // CYLO: the device advertises as "CYLO BTPrinter", so match any advertised
+   // name starting with 'cylo' case-insensitively (the BLE advertising packet
+   // can also truncate a longer advertised name). This fallback only applies
+   // after the exact-match list above has been exhausted, so the matching
+   // behaviour of the existing printer types is unchanged.
+   if (isPrefixCI(szName, "cylo"))
       return PRINTER_CYLO;
    return 255; // invalid name
 } /* tpFindPrinterName() */
